@@ -645,4 +645,45 @@ function remove(d){
 </script>
 </body>
 </html>
+create or replace function public.is_admin()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, auth
+as $$
+  select auth.uid() = (select id from auth.users order by created_at asc limit 1)
+$$;
+grant execute on function public.is_admin() to anon, authenticated;
+
+create table if not exists public.documents (
+  id uuid primary key default gen_random_uuid(),
+  owner_kind text not null check (owner_kind in ('Vehicle','Driver','Company')),
+  owner_name text not null,
+  doc_type text not null,
+  expiry_date date,
+  notes text,
+  file_path text not null,
+  file_name text not null,
+  file_size bigint,
+  created_at timestamptz not null default now()
+);
+alter table public.documents enable row level security;
+grant select, insert, update, delete on public.documents to authenticated;
+
+drop policy if exists "admin only documents" on public.documents;
+create policy "admin only documents" on public.documents
+  for all to authenticated
+  using (public.is_admin())
+  with check (public.is_admin());
+
+insert into storage.buckets (id, name, public, file_size_limit)
+values ('vault', 'vault', false, 52428800)
+on conflict (id) do update set public = false, file_size_limit = 52428800;
+
+drop policy if exists "admin only vault files" on storage.objects;
+create policy "admin only vault files" on storage.objects
+  for all to authenticated
+  using (bucket_id = 'vault' and public.is_admin())
+  with check (bucket_id = 'vault' and public.is_admin());
 
